@@ -160,6 +160,10 @@ object Parser {
     if (splitString._1.isEmpty)
       Option.empty
     else
-      Option.apply((Expressions.constructNumber(splitString._1.toDouble), splitString._2))
+      try
+        Option.apply((Expressions.constructNumber(splitString._1.toDouble), splitString._2))
+      catch {
+        case _: Throwable => Option.empty
+      }
   }
 }
