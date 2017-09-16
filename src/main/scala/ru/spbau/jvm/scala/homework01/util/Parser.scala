@@ -64,7 +64,7 @@ object Parser {
 
   private[this] def parseBinaryOperator(firstArgumentOption: Option[(Expression, String)], currentPrecedence: Int): Option[(Expression, String)] =
     (for {
-      (firstArgument, rest) <- firstArgumentOption
+      (firstArgument, rest) <- firstArgumentOption.toSeq
       (name, info) <- Expressions
         .operators
         .binaryOperators
@@ -93,8 +93,11 @@ object Parser {
   private[this] def parseExpressionWithBinaryOperators(string: String, currentPrecedence: Int): Option[(Expression, String)] = {
     object helper extends ((Option[(Expression, String)]) => Option[(Expression, String)]) {
       override def apply(binaryOperation: Option[(Expression, String)]): Option[(Expression, String)] =
-        (binaryOperation ++ apply(parseBinaryOperator(binaryOperation, currentPrecedence)))
-          .reduceLeftOption((res, _) => res)
+        binaryOperation match {
+          case Some(_) => (apply(parseBinaryOperator(binaryOperation, currentPrecedence)) ++ binaryOperation)
+            .reduceLeftOption((res, _) => res)
+          case _ => Option.empty
+        }
     }
 
     helper(parseExpression(string, currentPrecedence - 1))
@@ -102,8 +105,8 @@ object Parser {
 
   private[this] def parseExpression(string: String, currentPrecedence: Int = Expressions.operators.precedenceRange.max): Option[(Expression, String)] =
     (if (currentPrecedence == 0)
-      parseBracedExpression(string) ++
-        parseNumber(string) ++
+      parseNumber(string) ++
+        parseBracedExpression(string) ++
         parseFunction(string)
     else
       parseUnaryOperator(string, currentPrecedence) ++
@@ -125,15 +128,11 @@ object Parser {
         }
     }
 
-    val splitString = string.span(doublePredicate)
-
-    if (splitString._1.isEmpty)
-      Option.empty
-    else
-      try
-        Option.apply((Expressions.constructNumber(splitString._1.toDouble), splitString._2))
-      catch {
-        case _: Throwable => Option.empty
-      }
+    try {
+      val splitString = string.span(doublePredicate)
+      Option.apply((Expressions.constructNumber(splitString._1.toDouble), splitString._2))
+    } catch {
+      case _: NumberFormatException => Option.empty
+    }
   }
 }
