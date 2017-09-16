@@ -13,132 +13,102 @@ object Parser {
     * @param string string to parse
     * @return parsed expression
     */
-  def parse(string: String): Option[Expression] = {
-    val result = parseExpression(string)
-    if (result.nonEmpty && result.get._2.isEmpty)
-      Option.apply(result.get._1)
-    else
-      Option.empty
-  }
+  def parse(string: String): Option[Expression] =
+    parseExpression(string).filter(_._2.isEmpty).map(_._1)
 
-  private[this] def parseFunctionArguments(left: Int, string: String): Option[(Seq[Expression], String)] = {
-    if (left == 0) {
-      return Option.apply((Seq(), string))
-    }
-    val currentArgument = parseExpression(string)
-    if (currentArgument.nonEmpty && currentArgument.get._2.startsWith(if (left > 1) "," else ")"))
-      parseFunctionArguments(left - 1, currentArgument.get._2.substring(1))
-          .map((nextArguments) => (
-            nextArguments._1.+:(currentArgument.get._1),
-            nextArguments._2
-          ))
+  private[this] def parseFunctionArguments(left: Int, string: String): Option[(Seq[Expression], String)] =
+    if (left == 0)
+      Option.apply((Seq(), string))
     else
-      Option.empty
-  }
+      for {
+        (firstArg, rest1) <- parseExpression(string)
+          .filter(_._2.startsWith(if (left > 1) "," else ")"))
+        (otherArgs, rest2) <- parseFunctionArguments(left - 1, rest1.substring(1))
+      } yield (otherArgs.+:(firstArg), rest2)
+
 
   private[this] def isValidFunctionBeginning(string: String, name: String): Boolean =
     string.startsWith(name ++ "(")
 
-  private[this] def parseFunction(string: String): Option[(Expression, String)] = {
-    for ((name: String, info: MathFunctionInfo) <- Expressions
+  private[this] def parseFunction(string: String): Option[(Expression, String)] =
+    (for {
+      (name, info) <- Expressions
         .mathFunctions
         .info
-        .filter((tuple) => isValidFunctionBeginning(string, tuple._1))) {
-      val args =
-        parseFunctionArguments(
-          info.argumentCount,
-          string.substring(name.length + 1)
-        )
-      if (args.nonEmpty) {
-        return Option.apply((info.constructor(args.get._1), args.get._2))
-      }
-    }
-    Option.empty
-  }
+        .filterKeys((name) => isValidFunctionBeginning(string, name))
+        .toList
+      (args, rest) <- parseFunctionArguments(
+        info.argumentCount,
+        string.substring(name.length + 1))
+    } yield (Expressions.constructMathFunction(name, args), rest))
+      .reduceLeftOption((res, _) => res)
 
-  private[this] def parseUnaryOperator(string: String, currentPrecedence: Int): Option[(Expression, String)] = {
-    for ((name, _) <- Expressions
+
+  private[this] def parseUnaryOperator(string: String, currentPrecedence: Int): Option[(Expression, String)] =
+    (for {
+      (name, _) <- Expressions
         .operators
         .unaryOperators
         .info
-        .filter((tuple) => tuple._2.precedence == currentPrecedence && string.startsWith(tuple._1))) {
-      val result = parseExpression(string.substring(name.length), currentPrecedence)
-      if (result.nonEmpty) {
-        return Option.apply((
-          Expressions.constructUnaryOperator(name, result.get._1),
-          result.get._2
-        ))
-      }
-    }
-    Option.empty
-  }
+        .filter((tuple) => tuple._2.precedence == currentPrecedence && string.startsWith(tuple._1))
+        .toList
+      (underlying, rest) <- parseExpression(string.substring(name.length), currentPrecedence)
+    } yield (Expressions.constructUnaryOperator(name, underlying), rest))
+      .reduceLeftOption((res, _) => res)
 
-  private[this] def parseBinaryOperator(firstArgument: Option[(Expression, String)], currentPrecedence: Int): Option[(Expression, String)] = {
-    if (firstArgument.isEmpty)
-      return Option.empty
-    for ((name, info) <- Expressions
+  private[this] def parseLeftBinaryOperatorHelper(parsed: Option[(Expression, String)], currentPrecedence: Int, name: String): Option[(Expression, String)] =
+    for {
+      (cur, rest) <- parsed
+      (next, newRest) <- parseExpression(rest.substring(name.length), currentPrecedence - 1)
+    } yield (Expressions.constructBinaryOperator(name, cur, next), newRest)
+
+  private[this] def parseBinaryOperator(firstArgumentOption: Option[(Expression, String)], currentPrecedence: Int): Option[(Expression, String)] =
+    (for {
+      (firstArgument, rest) <- firstArgumentOption
+      (name, info) <- Expressions
         .operators
         .binaryOperators
         .info
         .filter((tuple) => tuple._2.precedence == currentPrecedence &&
-          firstArgument.get._2.startsWith(tuple._1))) {
-      if (info.associativity == Associativity.Left) {
-        var currentResult = firstArgument
-        while (currentResult.nonEmpty && currentResult.get._2.startsWith(name)) {
-          val nextArgument = parseExpression(
-            currentResult.get._2.substring(name.length),
-            currentPrecedence - 1
-          )
-          if (nextArgument.nonEmpty) {
-            currentResult =
-              for {
-                (cur, _) <- currentResult
-                (next, newRest) <- nextArgument
-              } yield (Expressions.constructBinaryOperator(name, cur, next), newRest)
-          }
-        }
-        return currentResult
-      } else {
-        val secondArgument = parseExpression(
-          firstArgument.get._2.substring(name.length),
-          currentPrecedence
-        )
-        if (secondArgument.nonEmpty)
-          return Option.apply((Expressions
-            .constructBinaryOperator(
-              name,
-              firstArgument.get._1,
-              secondArgument.get._1), secondArgument.get._2
+          rest.startsWith(tuple._1))
+        .toList
+      result <- info.associativity match {
+        case Associativity.Left => parseLeftBinaryOperatorHelper(firstArgumentOption, currentPrecedence, name)
+        case Associativity.Right => parseExpression(rest.substring (name.length), currentPrecedence)
+          .map((secondArgumentTuple) => (Expressions
+            .constructBinaryOperator(name, firstArgument, secondArgumentTuple._1), secondArgumentTuple._2
           ))
       }
+    } yield result)
+      .reduceLeftOption((res, _) => res)
+
+  private[this] def parseBracedExpression(string: String): Option[(Expression, String)] =
+    if (string.startsWith("("))
+      parseExpression(string.substring(1))
+        .filter(_._2.startsWith(")"))
+        .map((tuple) => (tuple._1, tuple._2.substring(1)))
+    else
+      Option.empty
+
+  private[this] def parseExpressionWithBinaryOperators(string: String, currentPrecedence: Int): Option[(Expression, String)] = {
+    object helper extends ((Option[(Expression, String)]) => Option[(Expression, String)]) {
+      override def apply(binaryOperation: Option[(Expression, String)]): Option[(Expression, String)] =
+        (binaryOperation ++ apply(parseBinaryOperator(binaryOperation, currentPrecedence)))
+          .reduceLeftOption((res, _) => res)
     }
-    Option.empty
+
+    helper(parseExpression(string, currentPrecedence - 1))
   }
 
-  private[this] def parseExpression(string: String, currentPrecedence: Int = Expressions.operators.precedenceRange.max): Option[(Expression, String)] = {
-    if (currentPrecedence == 0) {
-      if (string.startsWith("(")) {
-        val bracedExpression = parseExpression(string.substring(1))
-        if (bracedExpression.nonEmpty && bracedExpression.get._2.startsWith(")")) {
-          return bracedExpression.map((tuple) => (tuple._1, tuple._2.substring(1)))
-        }
-        return Option.empty
-      }
-      return (parseNumber(string) ++ parseFunction(string)).reduceLeftOption((a, _) => a)
-    }
-    val unaryParsed = parseUnaryOperator(string, currentPrecedence)
-    if (unaryParsed.nonEmpty) {
-      return unaryParsed
-    }
-    var binaryOperation = parseExpression(string, currentPrecedence - 1)
-    while (true) {
-      val currentOperation = parseBinaryOperator(binaryOperation, currentPrecedence)
-      if (currentOperation.isEmpty)
-        return binaryOperation
-      binaryOperation = currentOperation
-    }
-    Option.empty
-  }
+  private[this] def parseExpression(string: String, currentPrecedence: Int = Expressions.operators.precedenceRange.max): Option[(Expression, String)] =
+    (if (currentPrecedence == 0)
+      parseBracedExpression(string) ++
+        parseNumber(string) ++
+        parseFunction(string)
+    else
+      parseUnaryOperator(string, currentPrecedence) ++
+        parseExpressionWithBinaryOperators(string, currentPrecedence)
+    ).reduceLeftOption((res, _) => res)
 
   private[this] def parseNumber(string: String): Option[(MyNumber, String)] = {
     object doublePredicate extends ((Char) => Boolean) {
