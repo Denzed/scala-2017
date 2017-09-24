@@ -3,21 +3,18 @@ package ru.spbau.jvm.scala.homework03.database
 import akka.persistence.PersistentActor
 
 import scala.collection.mutable
-import scala.collection.mutable.ArrayBuffer
-import scala.util.Random
 
-class LabirinthActor extends PersistentActor {
+class LabyrinthActor extends PersistentActor {
 
-  import LabirinthActor._
+  import LabyrinthActor._
 
-  val map: mutable.HashMap[Long, ArrayBuffer[(String, String)]] =
+  val map: mutable.HashMap[Long, Labyrinth] =
     mutable.HashMap.empty
 
   def receiveEvent(event: Event): Unit = {
     event match {
-      case AddWord(id, word, translation) =>
-        map.getOrElseUpdate(id, ArrayBuffer.empty) +=
-          ((word, translation))
+      case Start(id, width, height) => map.update(id, new Labyrinth(width, height))
+      case Finish(id) => map.remove(id)
     }
   }
 
@@ -27,36 +24,30 @@ class LabirinthActor extends PersistentActor {
 
   override def receiveCommand: Receive = {
     case evt: Event => persist(evt)(receiveEvent)
-    case GetWords(id) =>
-      sender ! Words(map.getOrElse(id, ArrayBuffer.empty))
-    case GetWordToLearn(id) =>
-      map.get(id) match {
-        case Some(buffer) =>
-          val (word, translation) =
-            buffer(Random.nextInt(buffer.length))
-          sender ! WordToLearn(word, translation)
-        case None =>
-          sender ! WordToLearn("word", "слово")
-      }
+    case GetPosition(id) =>
+      sender ! Position(map.get(id).map(_.currentPosition).getOrElse((-1, -1)))
+    case Go(id, direction, steps) =>
+      sender ! GoResult(map.get(id).map(_.goTo(direction, steps)).getOrElse(NoLabyrinth))
   }
 
-  override def persistenceId = "au-lecture-database"
+  override def persistenceId = "au-labyrinth-database"
 }
 
-object LabirinthActor {
+object LabyrinthActor {
 
   //events
   trait Event
 
-  case class AddWord(id: Long, word: String, translation: String) extends Event
+  case class Start(id: Long, width: Int, height: Int) extends Event
+
+  case class Finish(id: Long) extends Event
 
   //queries
-  case class GetWordToLearn(id: Long)
+  case class GetPosition(id: Long)
 
-  case class GetWords(id: Long)
+  case class Position(position: (Int, Int))
 
-  case class WordToLearn(word: String, translation: String)
+  case class Go(id: Long, direction: String, steps: Int)
 
-  case class Words(buffer: ArrayBuffer[(String, String)])
-
+  case class GoResult(result: MoveResult)
 }

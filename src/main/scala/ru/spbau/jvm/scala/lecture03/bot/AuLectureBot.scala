@@ -16,7 +16,7 @@ import scala.concurrent.duration.DurationInt
 import scala.util.Success
 
 class AskActor(bot: AuLectureBot) extends Actor {
-  override def receive = {
+  override def receive: PartialFunction[Any, Unit] = {
     case _ => bot.askUsers()
   }
 }

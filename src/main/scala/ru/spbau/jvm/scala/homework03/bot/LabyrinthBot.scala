@@ -5,66 +5,64 @@ import akka.pattern.ask
 import akka.util.Timeout
 import info.mukel.telegrambot4s.api.declarative.Commands
 import info.mukel.telegrambot4s.api.{Polling, TelegramBot}
-import ru.spbau.jvm.scala.lecture03.database.AuLectureActor._
-import ru.spbau.jvm.scala.lecture03.parser.MessageParser
-import ru.spbau.jvm.scala.lecture03.parser.messages.{AddWord => AddWordMessage, _}
+import ru.spbau.jvm.scala.homework03.database.LabyrinthActor._
+import ru.spbau.jvm.scala.homework03.database.{MoveBlockedByWall, MoveSuccessful, MoveToExit, NoLabyrinth}
+import ru.spbau.jvm.scala.homework03.parser.MessageParser
+import ru.spbau.jvm.scala.homework03.parser.messages.{FinishMessage, GetPositionMessage, GoMessage, StartMessage}
 
-import scala.collection.mutable
 import scala.concurrent.duration.DurationInt
 import scala.util.Success
 
-class AskActor(bot: AuLectureBot) extends Actor {
+class AskActor(bot: LabyrinthBot) extends Actor {
   override def receive: PartialFunction[Any, Unit] = {
     case _ => bot.askUsers()
   }
 }
 
-class AuLectureBot(val token: String,
+class LabyrinthBot(val token: String,
                    val database: ActorRef) extends TelegramBot with Polling with Commands {
   def askUsers(): Unit = {
-
   }
-
-  val map: mutable.HashMap[Long, String] = mutable.HashMap.empty
 
   onMessage {
     implicit message =>
       message.text.foreach { text =>
-        if (map.contains(message.chat.id)) {
-          if (text == map(message.chat.id)) {
-            reply("Правильно! Молодец!")
-          } else {
-            reply("Неправильно! Не молодец!")
-          }
-          map.remove(message.chat.id)
-        } else
-          MessageParser.parse(text) match {
-            case AddWordMessage(word, translation) =>
-              database !
-                AddWord(message.chat.id, word, translation)
-              reply("Слово добавлено!:)")
-            case MyWords =>
-              implicit val timeout: Timeout = Timeout(1.second)
-              (database ? GetWords(message.chat.id)).onComplete {
-                case Success(Words(buffer)) =>
-                  reply(buffer.map {
-                    case (word, translation) => s"$word -> $translation"
-                  }.mkString("\n"))
-                case _ =>
-                  reply("Ошибка базы данных!:(")
-              }
-            case CheckMe =>
-              implicit val timeout: Timeout = Timeout(1.second)
-              (database ? GetWordToLearn(message.chat.id)).onComplete {
-                case Success(WordToLearn(word, translation)) =>
-                  map += ((message.chat.id, translation))
-                  reply(word + "?")
-                case _ =>
-                  reply("Ошибка базы данных!:(")
-              }
-            case WrongMessage =>
-              reply("Неверная команда:(")
-          }
+        MessageParser.parse(text) match {
+          case StartMessage(width, height) =>
+            database !
+              Start(message.chat.id, width, height)
+            reply(s"Generated labyrinth of size ${width}x$height")
+          case GoMessage(direction, steps) =>
+            implicit val timeout: Timeout = Timeout(1.second)
+            (database ? Go(message.chat.id, direction, steps)).onComplete {
+              case Success(GoResult(result)) =>
+                reply(result match {
+                  case MoveSuccessful => "OK"
+                  case MoveBlockedByWall => "A wall is blocking the way. No movement commenced"
+                  case MoveToExit(turns) =>
+                    database !
+                      Finish(message.chat.id)
+                    s"You found a way out just in $turns turns!"
+                  case NoLabyrinth => "You are not in a labyrinth right now, but feel free to generate one typing \"start\""
+                })
+              case _ =>
+                reply("Database error")
+            }
+          case GetPositionMessage =>
+            implicit val timeout: Timeout = Timeout(1.second)
+            (database ? GetPosition(message.chat.id)).onComplete {
+              case Success(Position((-1, -1))) =>
+                reply("You are not in a labyrinth right now")
+              case Success(Position(position)) =>
+                reply(s"Your current position is $position")
+              case _ =>
+                reply("Database error")
+            }
+          case FinishMessage =>
+            database !
+              Finish(message.chat.id)
+            reply("Destroyed your labyrinth")
+        }
       }
   }
 }
