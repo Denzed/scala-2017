@@ -1,5 +1,7 @@
 package ru.spbau.jvm.scala.homework03.database.labyrinth
 
+import scala.collection.mutable
+
 class Labyrinth private[Labyrinth](val width: Int, val height: Int) {
   val field: Array[Array[Cell]] = generateField()
   var currentPosition: (Int, Int) = (1, 1)
@@ -15,7 +17,7 @@ class Labyrinth private[Labyrinth](val width: Int, val height: Int) {
         case Some(newPosition) => tempPosition = newPosition
         case _                 => return WrongDirection
       }
-      field(tempPosition._1)(tempPosition._2) match {
+      field(tempPosition._2)(tempPosition._1) match {
         case WallCell => return MoveBlockedByWall
         case ExitCell => return MoveToExit(moves)
         case EmptyCell =>
@@ -26,23 +28,27 @@ class Labyrinth private[Labyrinth](val width: Int, val height: Int) {
   }
 
   private[this] def carve(field: Array[Array[Cell]], position: (Int,Int)) {
-    val directions: List[Direction] =
-      List.iterate(
-        Direction.randomDirection(),
-        Direction.directions)(
-        Direction.nextDirectionClockwise)
-    for (direction <- directions;
-        position1@(x1, y1) <-
-          Direction.stepInDirection(position, direction);
-        position2@(x2, y2) <-
-          Direction.stepInDirection(position1, direction)) {
-      if(0 < x2 && x2 < width &&
-          0 < y2 && y2 < height &&
+    val queue: mutable.Queue[(Int,Int)] = mutable.Queue(position)
+    while (queue.nonEmpty) {
+      val curPos = queue.dequeue()
+      val directions: List[Direction] =
+        List.iterate(
+          Direction.randomDirection(),
+          Direction.directions)(
+          Direction.nextDirectionClockwise)
+      for (direction <- directions;
+           tmpPos1@(x1, y1) <-
+           Direction.stepInDirection(curPos, direction);
+           tmpPos2@(x2, y2) <-
+           Direction.stepInDirection(tmpPos1, direction)) {
+        if (0 < x2 && x2 < width - 1 &&
+          0 < y2 && y2 < height - 1 &&
           field(y1)(x1) == WallCell &&
           field(y2)(x2) == WallCell) {
-        field(y1)(x1) = EmptyCell
-        field(y2)(x2) = EmptyCell
-        carve(field, position2)
+          field(y1)(x1) = EmptyCell
+          field(y2)(x2) = EmptyCell
+          queue.enqueue(tmpPos2)
+        }
       }
     }
   }

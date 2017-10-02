@@ -7,8 +7,8 @@ trait Direction {
 }
 
 case object Undefined extends Direction {
-  override val dx: Int = ???
-  override val dy: Int = ???
+  override val dx: Int = 0
+  override val dy: Int = 0
 }
 
 case object North extends Direction {
