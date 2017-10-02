@@ -3,9 +3,17 @@ package ru.spbau.jvm.scala.homework04.mutable
 import scala.collection.{GenTraversableOnce, mutable}
 
 class Multiset[A] private (val counter: mutable.Map[A,Int] = mutable.Map.empty) {
+  // adds an element
+  def add(element: A): Option[Int] =
+    counter.put(element, counter.getOrElse(element, 0) + 1)
+
   // determines whether given element is contained in the multiset
   def apply(element: A): Boolean =
     counter.contains(element)
+
+  // just for testing purposes
+  private[mutable] def getCount(element: A): Option[Int] =
+    counter.get(element)
 
   // get the element
   def get(element: A): Option[A] =
@@ -18,6 +26,8 @@ class Multiset[A] private (val counter: mutable.Map[A,Int] = mutable.Map.empty) 
   // filters elements by predicate
   def filter(p: (A) ⇒ Boolean): Multiset[A] =
     new Multiset(mutable.Map() ++= counter.filterKeys(p))
+
+  def withFilter(p: (A) => Boolean): Multiset[A] = filter(p)
 
   // applies a given function to each element
   def map[B](f: (A) ⇒ B): Multiset[B] =
