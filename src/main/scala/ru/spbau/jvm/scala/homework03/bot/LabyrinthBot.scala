@@ -6,7 +6,8 @@ import akka.util.Timeout
 import info.mukel.telegrambot4s.api.declarative.Commands
 import info.mukel.telegrambot4s.api.{Polling, TelegramBot}
 import ru.spbau.jvm.scala.homework03.database.LabyrinthActor._
-import ru.spbau.jvm.scala.homework03.database.{MoveBlockedByWall, MoveSuccessful, MoveToExit, NoLabyrinth}
+import ru.spbau.jvm.scala.homework03.database._
+import ru.spbau.jvm.scala.homework03.database.labyrinth._
 import ru.spbau.jvm.scala.homework03.parser.MessageParser
 import ru.spbau.jvm.scala.homework03.parser.messages.{FinishMessage, GetPositionMessage, GoMessage, StartMessage}
 
@@ -29,9 +30,19 @@ class LabyrinthBot(val token: String,
       message.text.foreach { text =>
         MessageParser.parse(text) match {
           case StartMessage(width, height) =>
-            database !
-              Start(message.chat.id, width, height)
-            reply(s"Generated labyrinth of size ${width}x$height")
+            implicit val timeout: Timeout = Timeout(1.second)
+            (database ? MakeLabyrinth(message.chat.id, width, height)).onComplete {
+              case Success(MakeLabyrinthResult(result)) =>
+                reply(result match {
+                  case GenerationSuccessful =>
+                    s"Generated labyrinth of size ${width}x$height"
+                  case _                    =>
+                    s"An error occurred at labyrinth generation. " ++
+                      "Please, make sure it is at least " ++
+                      s"${Labyrinth.minimumWidth}x${Labyrinth.minimumHeight}"
+                })
+              case _ => reply("Database error")
+            }
           case GoMessage(direction, steps) =>
             implicit val timeout: Timeout = Timeout(1.second)
             (database ? Go(message.chat.id, direction, steps)).onComplete {
