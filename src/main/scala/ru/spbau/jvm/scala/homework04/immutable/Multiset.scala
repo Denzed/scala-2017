@@ -2,7 +2,7 @@ package ru.spbau.jvm.scala.homework04.immutable
 
 import scala.collection.GenTraversableOnce
 
-class Multiset[+A](val data: List[(A, Int)]) {
+class Multiset[+A] private (val data: Map[A, Int]) {
   // determines whether given element is contained in the multiset
   def apply[B >: A](element: B): Boolean =
     data.exists(tuple => tuple._1 == element)
@@ -13,38 +13,52 @@ class Multiset[+A](val data: List[(A, Int)]) {
         .map(_._1)
 
   // filters elements by predicate
-  def filter(p: (_ <: A) ⇒ Boolean): Multiset[A] =
-    new Multiset(data.filter(tuple => p(tuple._1)))
+  def filter(p: (A) ⇒ Boolean): Multiset[A] =
+    new Multiset(data.filterKeys(p))
 
   // applies a given function to each element
   def map[B](f: (A) ⇒ B): Multiset[B] =
-    new Multiset(data.map(tuple => (f(tuple._1), tuple._2)))
+    new Multiset(data
+      .groupBy(tuple => f(tuple._1))
+      .mapValues(_.foldLeft(0)((a, tuple) => a + tuple._2)))
 
   // maps each element to a some Traversable container and joins
-  def flatMap[B](f: (A) ⇒ GenTraversableOnce[B]): Multiset[B] =
-    new Multiset(data
-      .flatMap(tuple => f(tuple._1)
-      .toSeq.map(x => (x, tuple._2))))
+  def flatMap[B](f: (A) ⇒ GenTraversableOnce[B]): Multiset[B] = {
+    def helper(tuple: (A, Int)): Multiset[B] =
+      new Multiset[B](f(tuple._1)
+        .seq.toSeq
+        .groupBy(identity)
+        .mapValues(_.length * tuple._2))
+    data.foldLeft(Multiset[B]())((a, tuple) => a | helper(tuple))
+  }
 
   // multiset intersection
   def &[B >: A](other: Multiset[B]): Multiset[B] = {
-    val otherMap = Map(other.data :_*)
     new Multiset[B](for {
-      (x, cnt) <- data if otherMap.keySet(x)
-    } yield (x, Math.min(cnt, otherMap(x))))
+      (x, cnt) <- data if other.data.keySet(x)
+    } yield (x, Math.min(cnt, other.data(x))))
   }
 
-  private[this] def downcast[B >: A](): Multiset[B] =
+  private def downcast[B >: A](): Multiset[B] =
     map(identity)
 
   // multiset union
   def |[B >: A](other: Multiset[B]): Multiset[B] = {
-    val thisMap = Map(downcast[B]().data :_*)
-    val otherMap = Map(other.data :_*)
+    val downcastThis: Multiset[B] = downcast()
     new Multiset[B]((for {
-      x <- thisMap.keySet | otherMap.keySet
-    } yield (x, thisMap.getOrElse(x, 0) + otherMap.getOrElse(x, 0)))
-      .toList)
+      x <- downcastThis.data.keySet | other.data.keySet
+    } yield (x, downcastThis.data.getOrElse(x, 0) +
+                other.data.getOrElse(x, 0)))
+      .toMap)
+  }
+
+  // equality
+  override def equals(other: scala.Any): Boolean = {
+    other match {
+      case other: Multiset[A] =>
+        downcast().data == other.downcast().data
+      case _ => false
+    }
   }
 }
 
@@ -52,9 +66,11 @@ object Multiset {
   def apply[A](elements: A*): Multiset[A] =
     new Multiset[A](elements
       .groupBy(identity)
-      .mapValues(_.length)
-      .toList)
+      .mapValues(_.length))
 
   def unapplySeq[A](multiset: Multiset[A]): Option[Seq[A]] =
-    Some(multiset.data.flatMap(tuple => Seq.fill(tuple._2)(tuple._1)))
+    Some(multiset
+      .data
+      .flatMap(tuple => Seq.fill(tuple._2)(tuple._1))
+      .toSeq)
 }
